@@ -11,4 +11,16 @@ from .geometries import (  # noqa
     Polygon,
 )
 
-version = "0.3.4"
+__version__ = "0.4.0"
+
+__all__ = [
+    "Feature",
+    "FeatureCollection",
+    "GeometryCollection",
+    "LineString",
+    "MultiLineString",
+    "MultiPoint",
+    "MultiPolygon",
+    "Point",
+    "Polygon",
+]

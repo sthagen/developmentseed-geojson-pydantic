@@ -5,7 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2022-06-03
+
+### Added
+- `.wkt` property for Geometry object
+    ```python
+    from geojson_pydantic.geometries import Point
+
+    Point(coordinates=(1, 2)).wkt
+    >> 'POINT (1.0 2.0)'
+    ```
+
+- `.exterior` and `.interiors` properties for `geojson_pydantic.geometries.Polygon` object.
+    ```python
+    from geojson_pydantic.geometries import Polygon
+    polygon = Polygon(
+        coordinates=[
+            [(0, 0), (0, 10), (10, 10), (10, 0), (0, 0)],
+            [(2, 2), (2, 4), (4, 4), (4, 2), (2, 2)],
+        ]
+    )
+    polygon.exterior
+    >> [(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0), (0.0, 0.0)]
+
+    list(polygon.interiors)
+    >> [[(2.0, 2.0), (2.0, 4.0), (4.0, 4.0), (4.0, 2.0), (2.0, 2.0)]]
+    ```
+
+- `__geo_interface__` to `geojson_pydantic.geometries.GeometryCollection` object
+- `__geo_interface__` to `geojson_pydantic.feature.Feature` and `geojson_pydantic.feature.FeatureCollection` object
+- `geojson_pydantic.__all__` to declaring public objects (author @farridav, https://github.com/developmentseed/geojson-pydantic/pull/52)
+
+### Changed
+- switch to `pyproject.toml`
+- rename `geojson_pydantic.version` to `geojson_pydantic.__version__`
 
 ### Fixed
 - changelog compare links
@@ -138,7 +171,8 @@ Although the type file was added in `0.2.0` it wasn't included in the distribute
 ### Added
 - Initial Release
 
-[unreleased]: https://github.com/developmentseed/geojson-pydantic/compare/0.3.4...HEAD
+[unreleased]: https://github.com/developmentseed/geojson-pydantic/compare/0.4.0...HEAD
+[0.4.0]: https://github.com/developmentseed/geojson-pydantic/compare/0.3.4...0.4.0
 [0.3.4]: https://github.com/developmentseed/geojson-pydantic/compare/0.3.3...0.3.4
 [0.3.3]: https://github.com/developmentseed/geojson-pydantic/compare/0.3.2...0.3.3
 [0.3.2]: https://github.com/developmentseed/geojson-pydantic/compare/0.3.1...0.3.2
