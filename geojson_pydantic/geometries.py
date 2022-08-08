@@ -1,8 +1,7 @@
 """pydantic models for GeoJSON Geometry objects."""
 
 import abc
-import json
-from typing import Any, Iterator, List, Union
+from typing import Any, Dict, Iterator, List, Union
 
 from pydantic import BaseModel, Field, ValidationError, validator
 from pydantic.error_wrappers import ErrorWrapper
@@ -18,35 +17,19 @@ from geojson_pydantic.types import (
 )
 
 
-class GeoInterfaceMixin:
-    """Geo interface mixin class"""
-
-    @property
-    def __geo_interface__(self):
-        """GeoJSON-like protocol for geo-spatial (GIS) vector data."""
-        result = self.dict()
-        if "bbox" in result and result["bbox"] is None:
-            del result["bbox"]
-        return result
-
-
-class _GeometryBase(BaseModel, GeoInterfaceMixin, abc.ABC):
+class _GeometryBase(BaseModel, abc.ABC):
     """Base class for geometry models"""
 
     type: str
     coordinates: Any
 
-    @classmethod
-    def validate(cls, value):
-        try:
-            value = json.loads(value)
-        except TypeError:
-            try:
-                return cls(**value.dict())
-            except (AttributeError, ValidationError):
-                pass
+    @property
+    def __geo_interface__(self) -> Dict[str, Any]:
+        """GeoJSON-like protocol for geo-spatial (GIS) vector data.
 
-        return cls(**value)
+        ref: https://gist.github.com/sgillies/2217756#__geo_interface
+        """
+        return {"type": self.type, "coordinates": self.coordinates}
 
     @property
     @abc.abstractmethod
@@ -214,7 +197,7 @@ class MultiPolygon(_GeometryBase):
 Geometry = Union[Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon]
 
 
-class GeometryCollection(BaseModel, GeoInterfaceMixin):
+class GeometryCollection(BaseModel):
     """GeometryCollection Model"""
 
     type: str = Field("GeometryCollection", const=True)
@@ -246,6 +229,18 @@ class GeometryCollection(BaseModel, GeoInterfaceMixin):
     def wkt(self) -> str:
         """Return the Well Known Text representation."""
         return f"{self._wkt_type} ({self._wkt_coordinates})"
+
+    @property
+    def __geo_interface__(self) -> Dict[str, Any]:
+        """GeoJSON-like protocol for geo-spatial (GIS) vector data.
+
+        ref: https://gist.github.com/sgillies/2217756#__geo_interface
+        """
+        geometries = []
+        for geom in self.geometries:
+            geometries.append(geom.__geo_interface__)
+
+        return {"type": self.type, "geometries": self.geometries}
 
 
 def parse_geometry_obj(obj) -> Geometry:
