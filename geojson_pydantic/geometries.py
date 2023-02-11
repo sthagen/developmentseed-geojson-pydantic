@@ -1,11 +1,13 @@
 """pydantic models for GeoJSON Geometry objects."""
 
 import abc
-from typing import Any, Dict, Iterator, List, Union
+from typing import Any, Iterator, List, Literal, Union
 
 from pydantic import BaseModel, Field, ValidationError, validator
 from pydantic.error_wrappers import ErrorWrapper
+from typing_extensions import Annotated
 
+from geojson_pydantic.geo_interface import GeoInterfaceMixin
 from geojson_pydantic.types import (
     LinearRing,
     LineStringCoords,
@@ -17,29 +19,52 @@ from geojson_pydantic.types import (
 )
 
 
-class _GeometryBase(BaseModel, abc.ABC):
+def _position_wkt_coordinates(position: Position) -> str:
+    """Converts a Position to WKT Coordinates."""
+    return " ".join(str(number) for number in position)
+
+
+def _position_has_z(position: Position) -> bool:
+    return len(position) == 3
+
+
+def _position_list_wkt_coordinates(positions: List[Position]) -> str:
+    """Converts a list of Positions to WKT Coordinates."""
+    return ", ".join(_position_wkt_coordinates(position) for position in positions)
+
+
+def _position_list_has_z(positions: List[Position]) -> bool:
+    """Checks if any position in a list has a Z."""
+    return any(_position_has_z(position) for position in positions)
+
+
+def _lines_wtk_coordinates(lines: List[List[Position]]) -> str:
+    """Converts lines to WKT Coordinates."""
+    return ", ".join(f"({_position_list_wkt_coordinates(line)})" for line in lines)
+
+
+def _lines_has_z(lines: List[List[Position]]) -> bool:
+    """Checks if any position in a list has a Z."""
+    return any(
+        _position_has_z(position) for positions in lines for position in positions
+    )
+
+
+class _GeometryBase(BaseModel, abc.ABC, GeoInterfaceMixin):
     """Base class for geometry models"""
 
     type: str
     coordinates: Any
 
     @property
-    def __geo_interface__(self) -> Dict[str, Any]:
-        """GeoJSON-like protocol for geo-spatial (GIS) vector data.
-
-        ref: https://gist.github.com/sgillies/2217756#__geo_interface
-        """
-        return {"type": self.type, "coordinates": self.coordinates}
-
-    @property
     @abc.abstractmethod
-    def _wkt_coordinates(self) -> str:
+    def has_z(self) -> bool:
+        """Checks if any coordinate has a Z value."""
         ...
 
     @property
     @abc.abstractmethod
-    def _wkt_inset(self) -> str:
-        """Return Z for 3 dimensional geometry or an empty string for 2 dimensions."""
+    def _wkt_coordinates(self) -> str:
         ...
 
     @property
@@ -50,88 +75,88 @@ class _GeometryBase(BaseModel, abc.ABC):
     @property
     def wkt(self) -> str:
         """Return the Well Known Text representation."""
-        return f"{self._wkt_type}{self._wkt_inset}({self._wkt_coordinates})"
+        # Start with the WKT Type
+        wkt = self._wkt_type
+        if self.coordinates:
+            # If any of the coordinates have a Z add a "Z" to the WKT
+            wkt += " Z " if self.has_z else " "
+            # Add the rest of the WKT inside parentheses
+            wkt += f"({self._wkt_coordinates})"
+        else:
+            # Otherwise it will be "EMPTY"
+            wkt += " EMPTY"
+
+        return wkt
 
 
 class Point(_GeometryBase):
     """Point Model"""
 
-    type: str = Field(default="Point", const=True)
+    type: Literal["Point"]
     coordinates: Position
 
     @property
-    def _wkt_coordinates(self) -> str:
-        return " ".join(str(coordinate) for coordinate in self.coordinates)
+    def has_z(self) -> bool:
+        """Checks if any coordinate has a Z value."""
+        return _position_has_z(self.coordinates)
 
     @property
-    def _wkt_inset(self) -> str:
-        return " Z " if len(self.coordinates) == 3 else " "
+    def _wkt_coordinates(self) -> str:
+        return _position_wkt_coordinates(self.coordinates)
 
 
 class MultiPoint(_GeometryBase):
     """MultiPoint Model"""
 
-    type: str = Field(default="MultiPoint", const=True)
+    type: Literal["MultiPoint"]
     coordinates: MultiPointCoords
 
     @property
-    def _wkt_inset(self) -> str:
-        return " Z " if len(self.coordinates[0]) == 3 else " "
+    def has_z(self) -> bool:
+        """Checks if any coordinate has a Z value."""
+        return _position_list_has_z(self.coordinates)
 
     @property
     def _wkt_coordinates(self) -> str:
-        points = [Point(coordinates=p) for p in self.coordinates]
-        return ", ".join(point._wkt_coordinates for point in points)
+        return _position_list_wkt_coordinates(self.coordinates)
 
 
 class LineString(_GeometryBase):
     """LineString Model"""
 
-    type: str = Field(default="LineString", const=True)
+    type: Literal["LineString"]
     coordinates: LineStringCoords
 
     @property
-    def _wkt_inset(self) -> str:
-        return " Z " if len(self.coordinates[0]) == 3 else " "
+    def has_z(self) -> bool:
+        """Checks if any coordinate has a Z value."""
+        return _position_list_has_z(self.coordinates)
 
     @property
     def _wkt_coordinates(self) -> str:
-        points = [Point(coordinates=p) for p in self.coordinates]
-        return ", ".join(point._wkt_coordinates for point in points)
+        return _position_list_wkt_coordinates(self.coordinates)
 
 
 class MultiLineString(_GeometryBase):
     """MultiLineString Model"""
 
-    type: str = Field(default="MultiLineString", const=True)
+    type: Literal["MultiLineString"]
     coordinates: MultiLineStringCoords
 
     @property
-    def _wkt_inset(self) -> str:
-        return " Z " if len(self.coordinates[0][0]) == 3 else " "
+    def has_z(self) -> bool:
+        """Checks if any coordinate has a Z value."""
+        return _lines_has_z(self.coordinates)
 
     @property
     def _wkt_coordinates(self) -> str:
-        lines = [LineString(coordinates=line) for line in self.coordinates]
-        return ",".join(f"({line._wkt_coordinates})" for line in lines)
-
-
-class LinearRingGeom(LineString):
-    """LinearRing model."""
-
-    @validator("coordinates")
-    def check_closure(cls, coordinates: List) -> List:
-        """Validate that LinearRing is closed (first and last coordinate are the same)."""
-        if coordinates[-1] != coordinates[0]:
-            raise ValueError("LinearRing must have the same start and end coordinates")
-
-        return coordinates
+        return _lines_wtk_coordinates(self.coordinates)
 
 
 class Polygon(_GeometryBase):
     """Polygon Model"""
 
-    type: str = Field(default="Polygon", const=True)
+    type: Literal["Polygon"]
     coordinates: PolygonCoords
 
     @validator("coordinates")
@@ -143,9 +168,9 @@ class Polygon(_GeometryBase):
         return coordinates
 
     @property
-    def exterior(self) -> LinearRing:
+    def exterior(self) -> Union[LinearRing, None]:
         """Return the exterior Linear Ring of the polygon."""
-        return self.coordinates[0]
+        return self.coordinates[0] if self.coordinates else None
 
     @property
     def interiors(self) -> Iterator[LinearRing]:
@@ -155,16 +180,13 @@ class Polygon(_GeometryBase):
         )
 
     @property
-    def _wkt_inset(self) -> str:
-        return " Z " if len(self.coordinates[0][0]) == 3 else " "
+    def has_z(self) -> bool:
+        """Checks if any coordinates have a Z value."""
+        return _lines_has_z(self.coordinates)
 
     @property
     def _wkt_coordinates(self) -> str:
-        ic = "".join(
-            f", ({LinearRingGeom(coordinates=interior)._wkt_coordinates})"
-            for interior in self.interiors
-        )
-        return f"({LinearRingGeom(coordinates=self.exterior)._wkt_coordinates}){ic}"
+        return _lines_wtk_coordinates(self.coordinates)
 
     @classmethod
     def from_bounds(
@@ -172,35 +194,49 @@ class Polygon(_GeometryBase):
     ) -> "Polygon":
         """Create a Polygon geometry from a boundingbox."""
         return cls(
+            type="Polygon",
             coordinates=[
                 [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax), (xmin, ymin)]
-            ]
+            ],
         )
 
 
 class MultiPolygon(_GeometryBase):
     """MultiPolygon Model"""
 
-    type: str = Field(default="MultiPolygon", const=True)
+    type: Literal["MultiPolygon"]
     coordinates: MultiPolygonCoords
 
     @property
-    def _wkt_inset(self) -> str:
-        return " Z " if len(self.coordinates[0][0][0]) == 3 else " "
+    def has_z(self) -> bool:
+        """Checks if any coordinates have a Z value."""
+        return any(_lines_has_z(polygon) for polygon in self.coordinates)
 
     @property
     def _wkt_coordinates(self) -> str:
-        polygons = [Polygon(coordinates=poly) for poly in self.coordinates]
-        return ",".join(f"({poly._wkt_coordinates})" for poly in polygons)
+        return ",".join(
+            f"({_lines_wtk_coordinates(polygon)})" for polygon in self.coordinates
+        )
+
+    @validator("coordinates")
+    def check_closure(cls, coordinates: List) -> List:
+        """Validate that Polygon is closed (first and last coordinate are the same)."""
+        if any([ring[-1] != ring[0] for polygon in coordinates for ring in polygon]):
+            raise ValueError("All linear rings have the same start and end coordinates")
+
+        return coordinates
 
 
-Geometry = Union[Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon]
+Geometry = Annotated[
+    Union[Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon],
+    Field(discriminator="type"),
+]
 
 
-class GeometryCollection(BaseModel):
+class GeometryCollection(BaseModel, GeoInterfaceMixin):
     """GeometryCollection Model"""
 
-    type: str = Field(default="GeometryCollection", const=True)
+    type: Literal["GeometryCollection"]
     geometries: List[Geometry]
 
     def __iter__(self) -> Iterator[Geometry]:  # type: ignore [override]
@@ -228,19 +264,11 @@ class GeometryCollection(BaseModel):
     @property
     def wkt(self) -> str:
         """Return the Well Known Text representation."""
-        return f"{self._wkt_type} ({self._wkt_coordinates})"
-
-    @property
-    def __geo_interface__(self) -> Dict[str, Any]:
-        """GeoJSON-like protocol for geo-spatial (GIS) vector data.
-
-        ref: https://gist.github.com/sgillies/2217756#__geo_interface
-        """
-        geometries: List[Dict[str, Any]] = []
-        for geom in self.geometries:
-            geometries.append(geom.__geo_interface__)
-
-        return {"type": self.type, "geometries": self.geometries}
+        return (
+            self._wkt_type
+            + " "
+            + (f"({self._wkt_coordinates})" if self._wkt_coordinates else "EMPTY")
+        )
 
 
 def parse_geometry_obj(obj: Any) -> Geometry:
