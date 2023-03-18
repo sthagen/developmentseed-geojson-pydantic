@@ -26,22 +26,29 @@ properties: Dict[str, Any] = {
     "size": randint(0, 1000),
 }
 
+coordinates = [
+    [
+        [13.38272, 52.46385],
+        [13.42786, 52.46385],
+        [13.42786, 52.48445],
+        [13.38272, 52.48445],
+        [13.38272, 52.46385],
+    ]
+]
+
 polygon: Dict[str, Any] = {
     "type": "Polygon",
-    "coordinates": [
-        [
-            [13.38272, 52.46385],
-            [13.42786, 52.46385],
-            [13.42786, 52.48445],
-            [13.38272, 52.48445],
-            [13.38272, 52.46385],
-        ]
-    ],
+    "coordinates": coordinates,
+}
+
+multipolygon: Dict[str, Any] = {
+    "type": "MultiPolygon",
+    "coordinates": [coordinates],
 }
 
 geom_collection: Dict[str, Any] = {
     "type": "GeometryCollection",
-    "geometries": [polygon, polygon],
+    "geometries": [polygon, multipolygon],
 }
 
 test_feature: Dict[str, Any] = {
@@ -131,7 +138,6 @@ def test_generic_geometry_collection():
     assert feature.properties.id == test_feature_geometry_collection["properties"]["id"]
     assert type(feature.geometry) == GeometryCollection
     assert feature.geometry.wkt.startswith("GEOMETRYCOLLECTION (POLYGON ")
-    assert feature.geometry.geometries[0].wkt == feature.geometry.geometries[1].wkt
     assert type(feature.properties) == GenericProperties
     assert hasattr(feature.properties, "id")
 
@@ -188,6 +194,20 @@ def test_feature_collection_geo_interface_with_null_geometry():
     assert "bbox" not in fc.__geo_interface__
     assert "bbox" not in fc.__geo_interface__["features"][0]
     assert "bbox" in fc.__geo_interface__["features"][1]
+
+
+@pytest.mark.parametrize("id", ["a", 1, "1"])
+def test_feature_id(id):
+    """Test if a string stays a string and if an int stays an int."""
+    feature = Feature(**test_feature, id=id)
+    assert feature.id == id
+
+
+@pytest.mark.parametrize("id", [True, 1.0])
+def test_bad_feature_id(id):
+    """make sure it raises error."""
+    with pytest.raises(ValidationError):
+        Feature(**test_feature, id=id)
 
 
 def test_feature_validation():
