@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import abc
 import warnings
-from typing import Any, Iterator, List, Literal, Optional, Union
+from typing import Any, Iterator, List, Literal, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 from typing_extensions import Annotated
 
-from geojson_pydantic.geo_interface import GeoInterfaceMixin
+from geojson_pydantic.base import _GeoJsonBase
 from geojson_pydantic.types import (
-    BBox,
     LinearRing,
     LineStringCoords,
     MultiLineStringCoords,
@@ -18,7 +17,6 @@ from geojson_pydantic.types import (
     MultiPolygonCoords,
     PolygonCoords,
     Position,
-    validate_bbox,
 )
 
 
@@ -67,17 +65,16 @@ def _lines_has_z(lines: List[LineStringCoords]) -> bool:
 def _polygons_wkt_coordinates(
     coordinates: List[PolygonCoords], force_z: bool = False
 ) -> str:
-    return ",".join(
+    return ", ".join(
         f"({_lines_wtk_coordinates(polygon, force_z)})" for polygon in coordinates
     )
 
 
-class _GeometryBase(BaseModel, abc.ABC, GeoInterfaceMixin):
+class _GeometryBase(_GeoJsonBase, abc.ABC):
     """Base class for geometry models"""
 
     type: str
     coordinates: Any
-    bbox: Optional[BBox] = None
 
     @abc.abstractmethod
     def __wkt_coordinates__(self, coordinates: Any, force_z: bool) -> str:
@@ -107,8 +104,6 @@ class _GeometryBase(BaseModel, abc.ABC, GeoInterfaceMixin):
 
         return wkt
 
-    _validate_bbox = field_validator("bbox")(validate_bbox)
-
 
 class Point(_GeometryBase):
     """Point Model"""
@@ -134,7 +129,10 @@ class MultiPoint(_GeometryBase):
 
     def __wkt_coordinates__(self, coordinates: Any, force_z: bool) -> str:
         """return WKT coordinates."""
-        return _position_list_wkt_coordinates(coordinates, force_z)
+        return ", ".join(
+            f"({_position_wkt_coordinates(position, force_z)})"
+            for position in coordinates
+        )
 
     @property
     def has_z(self) -> bool:
@@ -246,12 +244,11 @@ class MultiPolygon(_GeometryBase):
         return coordinates
 
 
-class GeometryCollection(BaseModel, GeoInterfaceMixin):
+class GeometryCollection(_GeoJsonBase):
     """GeometryCollection Model"""
 
     type: Literal["GeometryCollection"]
     geometries: List[Geometry]
-    bbox: Optional[BBox] = None
 
     def __iter__(self) -> Iterator[Geometry]:  # type: ignore [override]
         """iterate over geometries"""
@@ -282,8 +279,6 @@ class GeometryCollection(BaseModel, GeoInterfaceMixin):
         # If any of them contain `Z` add Z to the output wkt
         z = " Z " if "Z" in geometries else " "
         return f"{self.type.upper()}{z}{geometries}"
-
-    _validate_bbox = field_validator("bbox")(validate_bbox)
 
     @field_validator("geometries")
     def check_geometries(cls, geometries: List) -> List:
@@ -318,6 +313,8 @@ Geometry = Annotated[
     ],
     Field(discriminator="type"),
 ]
+
+GeometryCollection.model_rebuild()
 
 
 def parse_geometry_obj(obj: Any) -> Geometry:

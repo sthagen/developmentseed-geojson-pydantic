@@ -1,9 +1,8 @@
-import re
-from typing import Union
+import json
 
 import pytest
+import shapely
 from pydantic import ValidationError
-from shapely.geometry import shape
 
 from geojson_pydantic.geometries import (
     Geometry,
@@ -18,11 +17,21 @@ from geojson_pydantic.geometries import (
 )
 
 
-def assert_wkt_equivalence(geom: Union[Geometry, GeometryCollection]):
-    """Assert WKT equivalence with Shapely."""
-    # Remove any trailing `.0` to match Shapely format
-    clean_wkt = re.sub(r"\.0(\D)", r"\1", geom.wkt)
-    assert shape(geom).wkt == clean_wkt
+@pytest.mark.parametrize(
+    "obj",
+    [
+        GeometryCollection,
+        LineString,
+        MultiLineString,
+        MultiPoint,
+        MultiPolygon,
+        Point,
+        Polygon,
+    ],
+)
+def test_pydantic_schema(obj):
+    """Test schema for Pydantic Object."""
+    assert obj.model_json_schema()
 
 
 @pytest.mark.parametrize("coordinates", [(1.01, 2.01), (1.0, 2.0, 3.0), (1.0, 2.0)])
@@ -34,7 +43,6 @@ def test_point_valid_coordinates(coordinates):
     assert p.type == "Point"
     assert p.coordinates == coordinates
     assert hasattr(p, "__geo_interface__")
-    assert_wkt_equivalence(p)
 
 
 @pytest.mark.parametrize(
@@ -71,7 +79,6 @@ def test_multi_point_valid_coordinates(coordinates):
     assert p.type == "MultiPoint"
     assert p.coordinates == coordinates
     assert hasattr(p, "__geo_interface__")
-    assert_wkt_equivalence(p)
 
 
 @pytest.mark.parametrize(
@@ -106,7 +113,6 @@ def test_line_string_valid_coordinates(coordinates):
     assert linestring.type == "LineString"
     assert linestring.coordinates == coordinates
     assert hasattr(linestring, "__geo_interface__")
-    assert_wkt_equivalence(linestring)
 
 
 @pytest.mark.parametrize("coordinates", [None, "Foo", [], [(1.0, 2.0)], ["Foo", "Bar"]])
@@ -145,7 +151,6 @@ def test_multi_line_string_valid_coordinates(coordinates):
     assert multilinestring.type == "MultiLineString"
     assert multilinestring.coordinates == coordinates
     assert hasattr(multilinestring, "__geo_interface__")
-    assert_wkt_equivalence(multilinestring)
 
 
 @pytest.mark.parametrize(
@@ -183,7 +188,6 @@ def test_polygon_valid_coordinates(coordinates):
     else:
         assert polygon.exterior is None
     assert not list(polygon.interiors)
-    assert_wkt_equivalence(polygon)
 
 
 @pytest.mark.parametrize(
@@ -231,7 +235,6 @@ def test_polygon_with_holes(coordinates):
     assert hasattr(polygon, "__geo_interface__")
     assert polygon.exterior == polygon.coordinates[0]
     assert list(polygon.interiors) == [polygon.coordinates[1]]
-    assert_wkt_equivalence(polygon)
 
 
 @pytest.mark.parametrize(
@@ -308,7 +311,6 @@ def test_multi_polygon(coordinates):
 
     assert multi_polygon.type == "MultiPolygon"
     assert hasattr(multi_polygon, "__geo_interface__")
-    assert_wkt_equivalence(multi_polygon)
 
 
 @pytest.mark.parametrize(
@@ -477,7 +479,6 @@ def test_geometry_collection_iteration(coordinates):
         type="GeometryCollection", geometries=[polygon, multipolygon]
     )
     assert hasattr(gc, "__geo_interface__")
-    assert_wkt_equivalence(gc)
     iter(gc)
 
 
@@ -491,7 +492,6 @@ def test_len_geometry_collection(coordinates):
     gc = GeometryCollection(
         type="GeometryCollection", geometries=[polygon, multipolygon]
     )
-    assert_wkt_equivalence(gc)
     assert len(gc) == 2
 
 
@@ -505,7 +505,6 @@ def test_getitem_geometry_collection(coordinates):
     gc = GeometryCollection(
         type="GeometryCollection", geometries=[polygon, multipolygon]
     )
-    assert_wkt_equivalence(gc)
     assert polygon == gc[0]
     assert multipolygon == gc[1]
 
@@ -513,13 +512,19 @@ def test_getitem_geometry_collection(coordinates):
 def test_wkt_mixed_geometry_collection():
     point = Point(type="Point", coordinates=(0.0, 0.0, 0.0))
     line_string = LineString(type="LineString", coordinates=[(0.0, 0.0), (1.0, 1.0)])
-    gc = GeometryCollection(type="GeometryCollection", geometries=[point, line_string])
-    assert_wkt_equivalence(gc)
+    assert (
+        GeometryCollection(
+            type="GeometryCollection", geometries=[point, line_string]
+        ).wkt
+        == "GEOMETRYCOLLECTION Z (POINT Z (0.0 0.0 0.0), LINESTRING (0.0 0.0, 1.0 1.0))"
+    )
 
 
 def test_wkt_empty_geometry_collection():
-    gc = GeometryCollection(type="GeometryCollection", geometries=[])
-    assert_wkt_equivalence(gc)
+    assert (
+        GeometryCollection(type="GeometryCollection", geometries=[]).wkt
+        == "GEOMETRYCOLLECTION EMPTY"
+    )
 
 
 def test_geometry_collection_warnings():
@@ -717,3 +722,153 @@ def test_wkt_empty_geometrycollection():
     assert GeometryCollection(type="GeometryCollection", geometries=[]).wkt.endswith(
         " EMPTY"
     )
+
+
+@pytest.mark.parametrize(
+    "wkt",
+    (
+        "POINT (0.0 0.0)",
+        # "POINT EMPTY" does not result in valid GeoJSON
+        "POINT Z (0.0 0.0 0.0)",
+        "MULTIPOINT ((0.0 0.0))",
+        "MULTIPOINT Z ((0.0 0.0 0.0))",
+        "MULTIPOINT ((0.0 0.0), (1.0 1.0))",
+        "MULTIPOINT Z ((0.0 0.0 0.0), (1.0 1.0 1.0))",
+        "MULTIPOINT EMPTY",
+        "LINESTRING (0.0 0.0, 1.0 1.0, 2.0 2.0)",
+        "LINESTRING Z (0.0 0.0 0.0, 1.0 1.0 1.0, 2.0 2.0 2.0)",
+        # "LINESTRING EMPTY" does not result in valid GeoJSON
+        "MULTILINESTRING ((0.0 0.0, 1.0 1.0))",
+        "MULTILINESTRING ((0.0 0.0, 1.0 1.0), (1.0 1.0, 2.0 2.0))",
+        "MULTILINESTRING Z ((0.0 0.0 0.0, 1.0 1.0 1.0))",
+        "MULTILINESTRING Z ((0.0 0.0 0.0, 1.0 1.0 1.0), (1.0 1.0 1.0, 2.0 2.0 2.0))",
+        "MULTILINESTRING EMPTY",
+        "POLYGON ((0.0 0.0, 1.0 1.0, 2.0 2.0, 3.0 3.0, 0.0 0.0))",
+        "POLYGON ((0.0 0.0, 4.0 0.0, 4.0 4.0, 0.0 4.0, 0.0 0.0), (1.0 1.0, 1.0 2.0, 2.0 2.0, 2.0 1.0, 1.0 1.0))",
+        "POLYGON Z ((0.0 0.0 0.0, 1.0 1.0 0.0, 2.0 2.0 0.0, 3.0 3.0 0.0, 0.0 0.0 0.0))",
+        "POLYGON Z ((0.0 0.0 0.0, 4.0 0.0 0.0, 4.0 4.0 0.0, 0.0 4.0 0.0, 0.0 0.0 0.0), (1.0 1.0 0.0, 1.0 2.0 0.0, 2.0 2.0 0.0, 2.0 1.0 0.0, 1.0 1.0 0.0))",
+        "POLYGON EMPTY",
+        "MULTIPOLYGON (((0.0 0.0, 1.0 1.0, 2.0 2.0, 3.0 3.0, 0.0 0.0)))",
+        "MULTIPOLYGON (((0.0 0.0, 1.0 1.0, 2.0 2.0, 3.0 3.0, 0.0 0.0)), ((1.0 1.0, 2.0 2.0, 3.0 3.0, 4.0 4.0, 1.0 1.0)))",
+        "MULTIPOLYGON Z (((0.0 0.0 0.0, 1.0 1.0 0.0, 2.0 2.0 0.0, 3.0 3.0 0.0, 0.0 0.0 0.0)))",
+        "MULTIPOLYGON Z (((0.0 0.0 0.0, 1.0 1.0 0.0, 2.0 2.0 0.0, 3.0 3.0 0.0, 0.0 0.0 0.0)), ((1.0 1.0 0.0, 2.0 2.0 0.0, 3.0 3.0 0.0, 4.0 4.0 0.0, 1.0 1.0 0.0)))",
+        "MULTIPOLYGON EMPTY",
+        "GEOMETRYCOLLECTION (POINT (0.0 0.0))",
+        "GEOMETRYCOLLECTION (POINT (0.0 0.0), MULTIPOINT ((0.0 0.0), (1.0 1.0)))",
+        "GEOMETRYCOLLECTION Z (POLYGON EMPTY, MULTIPOLYGON Z (((0.0 0.0 0.0, 1.0 1.0 0.0, 2.0 2.0 0.0, 3.0 3.0 0.0, 0.0 0.0 0.0))))",
+        "GEOMETRYCOLLECTION Z (LINESTRING Z (0.0 0.0 0.0, 1.0 1.0 1.0, 2.0 2.0 2.0), MULTILINESTRING ((0.0 0.0, 1.0 1.0), (1.0 1.0, 2.0 2.0)))",
+        "GEOMETRYCOLLECTION EMPTY",
+    ),
+)
+def test_wkt(wkt: str):
+    # Use Shapely to parse the input WKT so we know it is parsable by other tools.
+    # Then load it into a Geometry and ensure the output WKT is the same as the input.
+    assert parse_geometry_obj(shapely.from_wkt(wkt).__geo_interface__).wkt == wkt
+
+
+@pytest.mark.parametrize(
+    "geom",
+    (
+        Point(type="Point", coordinates=[0, 0], bbox=[0, 0, 0, 0]),
+        Point(type="Point", coordinates=[0, 0]),
+        MultiPoint(type="MultiPoint", coordinates=[(0.0, 0.0)], bbox=[0, 0, 0, 0]),
+        MultiPoint(type="MultiPoint", coordinates=[(0.0, 0.0)]),
+        LineString(
+            type="LineString", coordinates=[(0.0, 0.0), (1.0, 1.0)], bbox=[0, 0, 1, 1]
+        ),
+        LineString(type="LineString", coordinates=[(0.0, 0.0), (1.0, 1.0)]),
+        MultiLineString(
+            type="MultiLineString",
+            coordinates=[[(0.0, 0.0), (1.0, 1.0)]],
+            bbox=[0, 0, 1, 1],
+        ),
+        MultiLineString(type="MultiLineString", coordinates=[[(0.0, 0.0), (1.0, 1.0)]]),
+        Polygon(
+            type="Polygon",
+            coordinates=[[(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (1.0, 2.0)]],
+            bbox=[1.0, 2.0, 5.0, 6.0],
+        ),
+        Polygon(
+            type="Polygon",
+            coordinates=[[(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (1.0, 2.0)]],
+        ),
+        MultiPolygon(
+            type="MultiPolygon",
+            coordinates=[[[(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (1.0, 2.0)]]],
+            bbox=[1.0, 2.0, 5.0, 6.0],
+        ),
+        MultiPolygon(
+            type="MultiPolygon",
+            coordinates=[[[(1.0, 2.0), (3.0, 4.0), (5.0, 6.0), (1.0, 2.0)]]],
+        ),
+    ),
+)
+def test_geometry_serializer(geom: Geometry):
+    # bbox should always be in the dictionary version of the model
+    # but should only be in the JSON version if not None
+    assert "bbox" in geom.model_dump()
+    if geom.bbox is not None:
+        assert "bbox" in geom.model_dump_json()
+    else:
+        assert "bbox" not in geom.model_dump_json()
+
+
+def test_geometry_collection_serializer():
+    geom = GeometryCollection(
+        type="GeometryCollection",
+        geometries=[
+            Point(type="Point", coordinates=[0, 0]),
+            LineString(type="LineString", coordinates=[(0.0, 0.0), (1.0, 1.0)]),
+        ],
+    )
+    # bbox will be in the Dict
+    assert "bbox" in geom.model_dump()
+    assert "bbox" in geom.model_dump()["geometries"][0]
+
+    # bbox should not be in any Geometry nor at the top level
+    geom_ser = json.loads(geom.model_dump_json())
+    assert "bbox" not in geom_ser
+    assert "bbox" not in geom_ser["geometries"][0]
+    assert "bbox" not in geom_ser["geometries"][0]
+
+    geom = GeometryCollection(
+        type="GeometryCollection",
+        geometries=[
+            Point(type="Point", coordinates=[0, 0], bbox=[0, 0, 0, 0]),
+            LineString(type="LineString", coordinates=[(0.0, 0.0), (1.0, 1.0)]),
+        ],
+    )
+    # bbox not in the top level but in the first geometry (point)
+    geom_ser = json.loads(geom.model_dump_json())
+    assert "bbox" not in geom_ser
+    assert "bbox" in geom_ser["geometries"][0]
+    assert "bbox" not in geom_ser["geometries"][1]
+
+    geom = GeometryCollection(
+        type="GeometryCollection",
+        geometries=[
+            Point(type="Point", coordinates=[0, 0], bbox=[0, 0, 0, 0]),
+            LineString(
+                type="LineString",
+                coordinates=[(0.0, 0.0), (1.0, 1.0)],
+                bbox=[0, 0, 1, 1],
+            ),
+        ],
+    )
+    geom_ser = json.loads(geom.model_dump_json())
+    assert "bbox" not in geom_ser
+    assert "bbox" in geom_ser["geometries"][0]
+    assert "bbox" in geom_ser["geometries"][1]
+
+    geom = GeometryCollection(
+        type="GeometryCollection",
+        geometries=[
+            Point(type="Point", coordinates=[0, 0]),
+            LineString(type="LineString", coordinates=[(0.0, 0.0), (1.0, 1.0)]),
+        ],
+        bbox=[0, 0, 1, 1],
+    )
+    geom_ser = json.loads(geom.model_dump_json())
+    assert "bbox" in geom_ser
+    assert "bbox" not in geom_ser["geometries"][0]
+    assert "bbox" not in geom_ser["geometries"][1]

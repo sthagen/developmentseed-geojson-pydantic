@@ -11,6 +11,7 @@ Note: Minor version `0.X.0` update might break the API, It's recommanded to pin 
 ### Fixed
 
 * reduce validation error message verbosity when discriminating Geometry types
+* MultiPoint WKT now includes parentheses around each Point
 
 ### Added
 
@@ -19,6 +20,16 @@ Note: Minor version `0.X.0` update might break the API, It's recommanded to pin 
 ### Changed
 
 * update pydantic requirement to `~=2.0`
+
+* update pydantic `FeatureCollection` generic model to allow named features in the generated schemas.
+
+    ```python
+    # before
+    FeatureCollection[Geometry, Properties]
+
+    # now
+    FeatureCollection[Feature[Geometry, Properties]]
+    ```
 
 * raise `ValueError` in `geomtries.parse_geometry_obj` instead of `ValidationError`
 
@@ -31,6 +42,22 @@ Note: Minor version `0.X.0` update might break the API, It's recommanded to pin 
     parse_geometry_obj({"type": "This type", "obviously": "doesn't exist"})
     >> ValueError("Unknown type: This type")
     ```
+
+* update JSON serializer to exclude null `bbox` and `id`
+
+    ```python
+    # before
+    Point(type="Point", coordinates=[0, 0]).json()
+    >> '{"type":"Point","coordinates":[0.0,0.0],"bbox":null}'
+
+    # now
+    Point(type="Point", coordinates=[0, 0]).model_dump_json()
+    >> '{"type":"Point","coordinates":[0.0,0.0]}'
+    ```
+
+* delete `geojson_pydantic.geo_interface.GeoInterfaceMixin` and replaced by `geojson_pydantic.base._GeoJsonBase` class
+
+* delete `geojson_pydantic.types.validate_bbox`
 
 ## [0.6.3] - 2023-07-02
 
