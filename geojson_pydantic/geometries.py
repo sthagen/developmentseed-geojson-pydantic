@@ -217,7 +217,9 @@ class Polygon(_GeometryBase):
     def check_closure(cls, coordinates: List) -> List:
         """Validate that Polygon is closed (first and last coordinate are the same)."""
         if any(ring[-1] != ring[0] for ring in coordinates):
-            raise ValueError("All linear rings have the same start and end coordinates")
+            raise ValueError(
+                "All linear rings MUST have the same start and end coordinates"
+            )
 
         return coordinates
 
@@ -274,7 +276,9 @@ class MultiPolygon(_GeometryBase):
     def check_closure(cls, coordinates: List) -> List:
         """Validate that Polygon is closed (first and last coordinate are the same)."""
         if any(ring[-1] != ring[0] for polygon in coordinates for ring in polygon):
-            raise ValueError("All linear rings have the same start and end coordinates")
+            raise ValueError(
+                "All linear rings MUST have the same start and end coordinates"
+            )
 
         return coordinates
 
@@ -310,7 +314,7 @@ class GeometryCollection(_GeoJsonBase):
 
         # Get the wkt from each of the geometries in the collection
         geometries = (
-            f'({", ".join(geom.wkt for geom in self.geometries)})'
+            f"({', '.join(geom.wkt for geom in self.geometries)})"
             if self.geometries
             else "EMPTY"
         )
